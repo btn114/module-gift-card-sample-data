@@ -34,17 +34,17 @@ class Installer implements Setup\SampleData\InstallerInterface
     /**
      * @var GiftCard
      */
-    private $abandonedCart;
+    private $giftCard;
 
     /**
      * Installer constructor.
      *
-     * @param GiftCard $abandonedCart
+     * @param GiftCard $giftCard
      */
     public function __construct(
-        GiftCard $abandonedCart
+        GiftCard $giftCard
     ) {
-        $this->abandonedCart = $abandonedCart;
+        $this->giftCard = $giftCard;
     }
 
     /**
@@ -53,6 +53,9 @@ class Installer implements Setup\SampleData\InstallerInterface
      */
     public function install()
     {
-        $this->abandonedCart->install(['Mageplaza_GiftCardSampleData::fixtures/abandoned_cart.csv']);
+        $this->giftCard->install([
+//            'Mageplaza_GiftCardSampleData::fixtures/gift_card.csv',
+            'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_template.csv'
+        ]);
     }
 }

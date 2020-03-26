@@ -25,23 +25,23 @@ use Exception;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
-use Magento\Catalog\Model\Product\Type;
 use Magento\Catalog\Model\Product\Visibility;
 use Magento\Catalog\Model\ProductFactory;
 use Magento\Catalog\Model\ProductRepository;
 use Magento\CatalogInventory\Api\Data\StockItemInterface;
 use Magento\CatalogInventory\Api\Data\StockItemInterfaceFactory;
-use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Framework\File\Csv;
+use Magento\Framework\Filesystem\Directory\WriteInterface;
 use Magento\Framework\Filesystem\Driver\File;
 use Magento\Framework\Setup\SampleData\Context as SampleDataContext;
 use Magento\Framework\Setup\SampleData\FixtureManager;
+use Magento\MediaStorage\Model\File\Uploader;
 use Magento\Quote\Api\CartRepositoryInterface;
-use Magento\Quote\Api\Data\CartItemInterface;
 use Magento\Quote\Api\Data\CartItemInterfaceFactory;
 use Magento\Quote\Api\GuestCartItemRepositoryInterface;
 use Magento\Quote\Api\GuestCartManagementInterface;
 use Magento\Quote\Model\MaskedQuoteIdToQuoteIdInterface;
+use Mageplaza\GiftCard\Helper\Data;
 use Mageplaza\GiftCard\Model\LogsFactory;
 
 /**
@@ -60,10 +60,6 @@ class GiftCard
      */
     protected $csvReader;
 
-    /**
-     * @var LogsFactory
-     */
-    protected $logFactory;
 
     /**
      * @var File
@@ -102,6 +98,31 @@ class GiftCard
      * @var GuestCartItemRepositoryInterface
      */
     private $itemRepository;
+    /**
+     * @var \Mageplaza\GiftCard\Helper\Template
+     */
+    private $templateHelper;
+
+    /**
+     * @var WriteInterface
+     */
+    protected $mediaDirectory;
+    /**
+     * @var \Magento\Framework\Module\Dir\Reader
+     */
+    private $moduleReader;
+
+    protected $viewDir = '';
+    /**
+     * @var \Magento\Framework\Filesystem\Io\File
+     */
+    private $ioFile;
+    /**
+     * @var \Mageplaza\GiftCard\Model\TemplateFactory
+     */
+    private $templateFactory;
+
+    protected $templates = [];
 
     /**
      * FreeShippingBar constructor.
@@ -116,7 +137,6 @@ class GiftCard
      * @param CartRepositoryInterface $cartRepository
      * @param CartItemInterfaceFactory $cartItemFactory
      * @param GuestCartItemRepositoryInterface $itemRepository
-     * @param LogsFactory $logFactory
      */
     public function __construct(
         SampleDataContext $sampleDataContext,
@@ -129,7 +149,10 @@ class GiftCard
         CartRepositoryInterface $cartRepository,
         CartItemInterfaceFactory $cartItemFactory,
         GuestCartItemRepositoryInterface $itemRepository,
-        LogsFactory $logFactory
+        \Mageplaza\GiftCard\Helper\Template $templateHelper,
+        \Magento\Framework\Module\Dir\Reader $moduleReader,
+        \Magento\Framework\Filesystem\Io\File $ioFile,
+        \Mageplaza\GiftCard\Model\TemplateFactory $templateFactory
     ) {
         $this->fixtureManager = $sampleDataContext->getFixtureManager();
         $this->csvReader = $sampleDataContext->getCsvReader();
@@ -142,7 +165,11 @@ class GiftCard
         $this->cartRepository = $cartRepository;
         $this->cartItemFactory = $cartItemFactory;
         $this->itemRepository = $itemRepository;
-        $this->logFactory = $logFactory;
+        $this->templateHelper = $templateHelper;
+        $this->mediaDirectory = $templateHelper->getMediaDirectory();
+        $this->moduleReader = $moduleReader;
+        $this->ioFile = $ioFile;
+        $this->templateFactory = $templateFactory;
     }
 
     /**
@@ -152,80 +179,203 @@ class GiftCard
      */
     public function install(array $fixtures)
     {
-        // check product is exists
-        try {
-            $product = $this->productRepository->get('mageplaza_abandoned_cart_sample_product');
-        } catch (NoSuchEntityException $e) {
-            $product = null;
-        }
-
-        // create new sample product if not exits
-        if (!$product || !$product->getId()) {
-
-            /** @var Product $product */
-            $product = $this->productFactory->create();
-
-        }
-
-        $product->setTypeId('simple')
-            ->setAttributeSetId(4)
-            ->setName('Mageplaza Abandoned Cart Sample Product')
-            ->setSku('mageplaza_abandoned_cart_sample_product')
-            ->setPrice(0.01)
-            ->setQty(100)
-            ->setVisibility(Visibility::VISIBILITY_BOTH)
-            ->setStatus(Status::STATUS_ENABLED);
-
-        /** @var StockItemInterface $stockItem */
-        $stockItem = $this->stockItemInterfaceFactory->create();
-        $stockItem->setQty(100)
-            ->setIsInStock(true);
-        $extensionAttributes = $product->getExtensionAttributes();
-        $extensionAttributes->setStockItem($stockItem);
-
-        /** @var ProductRepositoryInterface $productRepository */
-        $productRepository = $this->productRepository;
-        $productRepository->save($product);
-
-        // create new abandoned cart with sample product
-        $quoteIdMask = $this->guestCartManagement->createEmptyCart();
-
-        $cartId = $this->maskedQuoteIdToQuoteId->execute($quoteIdMask);
-        $cart = $this->cartRepository->get($cartId);
-        $cart->setCustomerEmail('nghiabt@mageplaza.com');
-
-        /** @var CartItemInterface $cartItem */
-        $cartItem = $this->cartItemFactory->create();
-        $cartItem->setQuoteId($quoteIdMask);
-        $cartItem->setQty(1);
-        $cartItem->setSku('mageplaza_abandoned_cart_sample_product');
-        $cartItem->setProductType(Type::TYPE_SIMPLE);
-
-        $this->itemRepository->save($cartItem);
-
-        $this->cartRepository->save($cart);
-
         foreach ($fixtures as $fileName) {
-            $fileName = $this->fixtureManager->getFixture($fileName);
-            if (!$this->file->isExists($fileName)) {
+            $file = $this->fixtureManager->getFixture($fileName);
+            if (!$this->ioFile->fileExists($file)) {
                 continue;
             }
 
-            $rows = $this->csvReader->getData($fileName);
+            $rows = $this->csvReader->setEnclosure("'")->getData($file);
             $header = array_shift($rows);
 
-            foreach ($rows as $row) {
-                $data = [];
-                foreach ($row as $key => $value) {
-                    $data[$header[$key]] = $value;
-                }
-                $row = $data;
-                $row['quote_id'] = $cartId;
+            switch ($fileName) {
+                case 'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_template.csv':
+                    foreach ($rows as $row) {
+                        $data = [];
+                        foreach ($row as $key => $value) {
+                            $data[$header[$key]] = $value;
+                        }
 
-                $this->logFactory->create()
-                    ->addData($row)
-                    ->save();
+                        $data = $this->processTemplateData($data);
+                        $template = $this->templateFactory->create()
+                            ->addData($data)
+                            ->save();
+                        $this->templates[] = $template->getId();
+                    }
+                    break;
+                case 'Mageplaza_GiftCardSampleData::fixtures/giftcard.csv':
+                    foreach ($rows as $rowKey => $row) {
+                        $data = [];
+                        foreach ($row as $key => $value) {
+                            $data[$header[$key]] = $value;
+                        }
+
+                        $data = $this->processProductData($data);
+
+                        $product = $this->productFactory->create();
+
+                        $product = $this->addProductImage($product, $data['image']);
+
+                        unset($data['image']);
+
+                        $product->addData($data)
+                            ->setTypeId(\Mageplaza\GiftCard\Model\Product\Type\GiftCard::TYPE_GIFTCARD)
+                            ->setAttributeSetId(4)
+                            ->setVisibility(Visibility::VISIBILITY_BOTH)
+                            ->setStatus(Status::STATUS_ENABLED);
+
+                        /** @var StockItemInterface $stockItem */
+                        $stockItem = $this->stockItemInterfaceFactory->create();
+                        $stockItem->setQty($data['qty'])
+                            ->setIsInStock(true);
+                        $extensionAttributes = $product->getExtensionAttributes();
+                        $extensionAttributes->setStockItem($stockItem);
+
+                        /** @var ProductRepositoryInterface $productRepository */
+                        $productRepository = $this->productRepository;
+                        $productRepository->save($product);
+                    }
+                    break;
+                default:
+                    return null;
             }
         }
+    }
+
+    /**
+     * @param Product $product
+     * @param $imgPath
+     * @return mixed
+     * @throws Exception
+     */
+    protected function addProductImage($product, $imgPath)
+    {
+        if ($imgPath) {
+            $filePath = ltrim($imgPath, '/');
+            $pathInfo = $this->ioFile->getPathInfo($filePath);
+            $fileName = $pathInfo['basename'];
+            $dispersion = $pathInfo['dirname'];
+            $file = $this->getFilePath('/files/product/' . $filePath);
+            $this->ioFile->checkAndCreateFolder('pub/media/catalog/product/' . $dispersion);
+            $fileName = Uploader::getCorrectFileName($fileName);
+            $fileName = Uploader::getNewFileName(
+                $this->mediaDirectory->getAbsolutePath('/catalog/product/' . $dispersion . '/' . $fileName)
+            );
+            $destinationFile = $this->mediaDirectory->getAbsolutePath(
+                '/catalog/product/' . $dispersion . '/' . $fileName
+            );
+
+            $destinationFilePath = $this->mediaDirectory->getAbsolutePath($destinationFile);
+            $this->ioFile->cp($file, $destinationFilePath);
+            $product->addImageToMediaGallery(
+                $destinationFilePath,
+                ['image', 'small_image', 'thumbnail']
+            );
+        }
+
+        return $product;
+    }
+
+    /**
+     * @param $data
+     * @return mixed
+     */
+    protected function processProductData($data)
+    {
+        $data['gift_card_amounts'] = $data['gift_card_amounts']
+            ? Data::jsonDecode($data['gift_card_amounts'])
+            : $data['gift_card_amounts'];
+
+        $data['gift_product_template'] = $this->templates;
+
+        return $data;
+    }
+
+    /**
+     * @param $data
+     * @return mixed
+     * @throws Exception
+     */
+    protected function processTemplateData($data)
+    {
+        $imagesData = $this->copyTemplateImages(Data::jsonDecode($data['images']));
+
+        $data['images'] = Data::jsonEncode($imagesData);
+
+        if ($data['background_image']) {
+            $fileName = $this->copyTemplateBackgroundImage($data['background_image']);
+            $data['background_image'] = str_replace('\\', '/', $fileName);
+        }
+
+        return $data;
+    }
+
+    /**
+     * @param $filePath
+     * @return string
+     * @throws Exception
+     */
+    protected function copyTemplateBackgroundImage($filePath)
+    {
+        if (!$filePath) {
+            return '';
+        }
+        $filePath = ltrim($filePath, '/');
+        $fileName = $this->ioFile->getPathInfo($filePath)['basename'];
+        $file = $this->getFilePath('/files/template/background-image/' . $filePath);
+        $this->ioFile->checkAndCreateFolder('pub/media/mageplaza/giftcard');
+        $fileName = Uploader::getCorrectFileName($fileName);
+        $fileName =
+            Uploader::getNewFileName($this->mediaDirectory->getAbsolutePath('/mageplaza/giftcard/' . $fileName));
+        $destinationFile = $this->templateHelper->getMediaPath($fileName);
+        $destinationFilePath = $this->mediaDirectory->getAbsolutePath($destinationFile);
+        $this->ioFile->cp($file, $destinationFilePath);
+
+        return $fileName;
+    }
+
+    /**
+     * @param $imagesData
+     * @return mixed
+     * @throws Exception
+     */
+    protected function copyTemplateImages($imagesData)
+    {
+        foreach ($imagesData as &$image) {
+            $filePath = ltrim($image['file'], '/');
+            if (!$filePath) {
+                continue;
+            }
+            $fileName = $this->ioFile->getPathInfo($filePath)['basename'];
+            $file = $this->getFilePath('/files/template/images/' . $filePath);
+            $fileName = Uploader::getCorrectFileName($fileName);
+            $dispersionPath = Uploader::getDispersionPath($fileName);
+            $fileName = $dispersionPath . '/' . $fileName;
+            $fileName = $this->templateHelper->getNotDuplicatedFilename($fileName, $dispersionPath);
+            $destinationFile = $this->templateHelper->getMediaPath($fileName);
+            $destinationFilePath = $this->mediaDirectory->getAbsolutePath($destinationFile);
+            $pathInfo = $this->ioFile->getPathInfo($destinationFilePath);
+            $this->ioFile->checkAndCreateFolder($pathInfo['dirname']);
+            $this->ioFile->cp($file, $destinationFilePath);
+            $image['file'] = str_replace('\\', '/', $fileName);
+        }
+
+        return $imagesData;
+    }
+
+    /**
+     * @param $path
+     * @return string
+     */
+    protected function getFilePath($path)
+    {
+        if (!$this->viewDir) {
+            $this->viewDir = $this->moduleReader->getModuleDir(
+                \Magento\Framework\Module\Dir::MODULE_VIEW_DIR,
+                'Mageplaza_GiftCardSampleData'
+            );
+        }
+
+        return $this->viewDir . $path;
     }
 }
