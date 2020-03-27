@@ -1,0 +1,3 @@
+'name','status','can_inherit','pattern','balance','can_redeem','store_id','image','template_fields','conditions_serialized','expired_at'
+'Valentine Day','1','0','[4AN]-[4A]-[4N]','50.0000','1','1','/v/a/valentinesday1.png','{"sender":"","recipient":"","message":""}','{"type":"Magento\\SalesRule\\Model\\Rule\\Condition\\Combine","aggregator":"all","value":"1","new_child":""}',
+'Voucher','1','0','[4AN]-[4A]-[4N]','30.0000','1','1',,'{"sender":"","recipient":"","message":""}','{"type":"Magento\\SalesRule\\Model\\Rule\\Condition\\Combine","aggregator":"all","value":"1","new_child":"","conditions":{"1":{"type":"Magento\\SalesRule\\Model\\Rule\\Condition\\Address","attribute":"base_subtotal","operator":">=","value":"100"}}}",

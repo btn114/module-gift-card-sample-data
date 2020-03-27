@@ -30,19 +30,24 @@ use Magento\Catalog\Model\ProductFactory;
 use Magento\Catalog\Model\ProductRepository;
 use Magento\CatalogInventory\Api\Data\StockItemInterface;
 use Magento\CatalogInventory\Api\Data\StockItemInterfaceFactory;
+use Magento\Framework\Exception\CouldNotSaveException;
+use Magento\Framework\Exception\InputException;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Exception\StateException;
 use Magento\Framework\File\Csv;
 use Magento\Framework\Filesystem\Directory\WriteInterface;
-use Magento\Framework\Filesystem\Driver\File;
+use Magento\Framework\Filesystem\Io\File;
+use Magento\Framework\Module\Dir;
+use Magento\Framework\Module\Dir\Reader;
 use Magento\Framework\Setup\SampleData\Context as SampleDataContext;
 use Magento\Framework\Setup\SampleData\FixtureManager;
 use Magento\MediaStorage\Model\File\Uploader;
-use Magento\Quote\Api\CartRepositoryInterface;
-use Magento\Quote\Api\Data\CartItemInterfaceFactory;
-use Magento\Quote\Api\GuestCartItemRepositoryInterface;
-use Magento\Quote\Api\GuestCartManagementInterface;
-use Magento\Quote\Model\MaskedQuoteIdToQuoteIdInterface;
 use Mageplaza\GiftCard\Helper\Data;
+use Mageplaza\GiftCard\Helper\Template;
+use Mageplaza\GiftCard\Model\GiftCardFactory;
 use Mageplaza\GiftCard\Model\LogsFactory;
+use Mageplaza\GiftCard\Model\PoolFactory;
+use Mageplaza\GiftCard\Model\TemplateFactory;
 
 /**
  * Class GiftCard
@@ -53,128 +58,119 @@ class GiftCard
     /**
      * @var FixtureManager
      */
-    private $fixtureManager;
+    protected $fixtureManager;
 
     /**
      * @var Csv
      */
     protected $csvReader;
 
-
-    /**
-     * @var File
-     */
-    private $file;
-
     /**
      * @var ProductRepository
      */
-    private $productRepository;
+    protected $productRepository;
+
     /**
      * @var ProductFactory
      */
-    private $productFactory;
+    protected $productFactory;
+
     /**
      * @var StockItemInterfaceFactory
      */
-    private $stockItemInterfaceFactory;
+    protected $stockItemInterfaceFactory;
+
     /**
-     * @var GuestCartManagementInterface
+     * @var Template
      */
-    private $guestCartManagement;
-    /**
-     * @var MaskedQuoteIdToQuoteIdInterface
-     */
-    private $maskedQuoteIdToQuoteId;
-    /**
-     * @var CartRepositoryInterface
-     */
-    private $cartRepository;
-    /**
-     * @var CartItemInterfaceFactory
-     */
-    private $cartItemFactory;
-    /**
-     * @var GuestCartItemRepositoryInterface
-     */
-    private $itemRepository;
-    /**
-     * @var \Mageplaza\GiftCard\Helper\Template
-     */
-    private $templateHelper;
+    protected $templateHelper;
 
     /**
      * @var WriteInterface
      */
     protected $mediaDirectory;
-    /**
-     * @var \Magento\Framework\Module\Dir\Reader
-     */
-    private $moduleReader;
 
+    /**
+     * @var Reader
+     */
+    protected $moduleReader;
+
+    /**
+     * @var string
+     */
     protected $viewDir = '';
-    /**
-     * @var \Magento\Framework\Filesystem\Io\File
-     */
-    private $ioFile;
-    /**
-     * @var \Mageplaza\GiftCard\Model\TemplateFactory
-     */
-    private $templateFactory;
 
+    /**
+     * @var File
+     */
+    protected $ioFile;
+
+    /**
+     * @var TemplateFactory
+     */
+    protected $templateFactory;
+
+    /**
+     * @var array
+     */
     protected $templates = [];
 
     /**
-     * FreeShippingBar constructor.
-     *
+     * @var PoolFactory
+     */
+    protected $poolFactory;
+
+    /**
+     * @var GiftCardFactory
+     */
+    protected $giftCardFactory;
+
+    /**
+     * GiftCard constructor.
      * @param SampleDataContext $sampleDataContext
-     * @param File $file
      * @param ProductRepositoryInterface $productRepository
      * @param ProductFactory $productFactory
      * @param StockItemInterfaceFactory $stockItemInterfaceFactory
-     * @param GuestCartManagementInterface $guestCartManagement
-     * @param MaskedQuoteIdToQuoteIdInterface $maskedQuoteIdToQuoteId
-     * @param CartRepositoryInterface $cartRepository
-     * @param CartItemInterfaceFactory $cartItemFactory
-     * @param GuestCartItemRepositoryInterface $itemRepository
+     * @param Template $templateHelper
+     * @param Reader $moduleReader
+     * @param File $ioFile
+     * @param TemplateFactory $templateFactory
+     * @param PoolFactory $poolFactory
+     * @param GiftCardFactory $giftCardFactory
      */
     public function __construct(
         SampleDataContext $sampleDataContext,
-        File $file,
         ProductRepositoryInterface $productRepository,
         ProductFactory $productFactory,
         StockItemInterfaceFactory $stockItemInterfaceFactory,
-        GuestCartManagementInterface $guestCartManagement,
-        MaskedQuoteIdToQuoteIdInterface $maskedQuoteIdToQuoteId,
-        CartRepositoryInterface $cartRepository,
-        CartItemInterfaceFactory $cartItemFactory,
-        GuestCartItemRepositoryInterface $itemRepository,
-        \Mageplaza\GiftCard\Helper\Template $templateHelper,
-        \Magento\Framework\Module\Dir\Reader $moduleReader,
-        \Magento\Framework\Filesystem\Io\File $ioFile,
-        \Mageplaza\GiftCard\Model\TemplateFactory $templateFactory
+        Template $templateHelper,
+        Reader $moduleReader,
+        File $ioFile,
+        TemplateFactory $templateFactory,
+        PoolFactory $poolFactory,
+        GiftCardFactory $giftCardFactory
     ) {
         $this->fixtureManager = $sampleDataContext->getFixtureManager();
         $this->csvReader = $sampleDataContext->getCsvReader();
-        $this->file = $file;
         $this->productRepository = $productRepository;
         $this->productFactory = $productFactory;
         $this->stockItemInterfaceFactory = $stockItemInterfaceFactory;
-        $this->guestCartManagement = $guestCartManagement;
-        $this->maskedQuoteIdToQuoteId = $maskedQuoteIdToQuoteId;
-        $this->cartRepository = $cartRepository;
-        $this->cartItemFactory = $cartItemFactory;
-        $this->itemRepository = $itemRepository;
         $this->templateHelper = $templateHelper;
         $this->mediaDirectory = $templateHelper->getMediaDirectory();
         $this->moduleReader = $moduleReader;
         $this->ioFile = $ioFile;
         $this->templateFactory = $templateFactory;
+        $this->poolFactory = $poolFactory;
+        $this->giftCardFactory = $giftCardFactory;
     }
 
     /**
      * @param array $fixtures
      *
+     * @throws CouldNotSaveException
+     * @throws InputException
+     * @throws LocalizedException
+     * @throws StateException
      * @throws Exception
      */
     public function install(array $fixtures)
@@ -209,15 +205,10 @@ class GiftCard
                         foreach ($row as $key => $value) {
                             $data[$header[$key]] = $value;
                         }
-
                         $data = $this->processProductData($data);
-
                         $product = $this->productFactory->create();
-
                         $product = $this->addProductImage($product, $data['image']);
-
                         unset($data['image']);
-
                         $product->addData($data)
                             ->setTypeId(\Mageplaza\GiftCard\Model\Product\Type\GiftCard::TYPE_GIFTCARD)
                             ->setAttributeSetId(4)
@@ -236,10 +227,52 @@ class GiftCard
                         $productRepository->save($product);
                     }
                     break;
+                case 'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_pool.csv':
+                    foreach ($rows as $row) {
+                        $data = [];
+                        foreach ($row as $key => $value) {
+                            $data[$header[$key]] = $value;
+                        }
+
+                        $data = $this->processPoolData($data);
+                        $pool = $this->poolFactory->create()
+                            ->addData($data)
+                            ->save();
+                        $giftCard = $this->giftCardFactory->create()
+                            ->setData($pool->getData())
+                            ->addData([
+                                'pattern' => '[4AN]-[4A]-[4N]',
+                                'pool_id' => $pool->getId(),
+                                'extra_content' => 'admin',
+                                'action_vars' => Data::jsonEncode(['pool_id' => $pool->getId()])
+                            ]);
+
+                        $giftCard->createMultiple(['qty' => 5]);
+                    }
+                    break;
                 default:
-                    return null;
             }
         }
+    }
+
+    /**
+     * @param $data
+     * @return mixed
+     */
+    protected function processPoolData($data)
+    {
+        if ($data['image']) {
+            $fileName = $this->ioFile->getPathInfo($data['image'])['filename'];
+            $template = $this->templateFactory->create()->getCollection()
+                ->addFieldToFilter('images', ['like' => '%' . $fileName . '%'])->getFirstItem();
+            if ($templateId = $template->getId()) {
+                $data['template_id'] = $templateId;
+            } else {
+                unset($data['image']);
+            }
+        }
+
+        return $data;
     }
 
     /**
@@ -371,7 +404,7 @@ class GiftCard
     {
         if (!$this->viewDir) {
             $this->viewDir = $this->moduleReader->getModuleDir(
-                \Magento\Framework\Module\Dir::MODULE_VIEW_DIR,
+                Dir::MODULE_VIEW_DIR,
                 'Mageplaza_GiftCardSampleData'
             );
         }

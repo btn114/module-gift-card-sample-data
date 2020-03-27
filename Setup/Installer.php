@@ -54,8 +54,9 @@ class Installer implements Setup\SampleData\InstallerInterface
     public function install()
     {
         $this->giftCard->install([
-//            'Mageplaza_GiftCardSampleData::fixtures/gift_card.csv',
-            'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_template.csv'
+            'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_template.csv',
+            'Mageplaza_GiftCardSampleData::fixtures/gift_card.csv',
+            'Mageplaza_GiftCardSampleData::fixtures/mageplaza_giftcard_pool.csv',
         ]);
     }
 }
