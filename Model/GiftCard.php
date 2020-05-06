@@ -23,6 +23,7 @@ namespace Mageplaza\GiftCardSampleData\Model;
 
 use Exception;
 use Magento\Catalog\Api\ProductRepositoryInterface;
+use Magento\Catalog\Model\CategoryFactory;
 use Magento\Catalog\Model\Product;
 use Magento\Catalog\Model\Product\Attribute\Source\Status;
 use Magento\Catalog\Model\Product\Visibility;
@@ -42,6 +43,7 @@ use Magento\Framework\Module\Dir\Reader;
 use Magento\Framework\Setup\SampleData\Context as SampleDataContext;
 use Magento\Framework\Setup\SampleData\FixtureManager;
 use Magento\MediaStorage\Model\File\Uploader;
+use Magento\Store\Model\StoreManagerInterface;
 use Mageplaza\GiftCard\Helper\Data;
 use Mageplaza\GiftCard\Helper\Template;
 use Mageplaza\GiftCard\Model\GiftCardFactory;
@@ -124,6 +126,14 @@ class GiftCard
      * @var GiftCardFactory
      */
     protected $giftCardFactory;
+    /**
+     * @var CategoryFactory
+     */
+    private $categoryFactory;
+    /**
+     * @var StoreManagerInterface
+     */
+    private $storeManager;
 
     /**
      * GiftCard constructor.
@@ -134,6 +144,8 @@ class GiftCard
      * @param Template $templateHelper
      * @param Reader $moduleReader
      * @param File $ioFile
+     * @param CategoryFactory $categoryFactory
+     * @param StoreManagerInterface $storeManager
      * @param TemplateFactory $templateFactory
      * @param PoolFactory $poolFactory
      * @param GiftCardFactory $giftCardFactory
@@ -146,6 +158,8 @@ class GiftCard
         Template $templateHelper,
         Reader $moduleReader,
         File $ioFile,
+        CategoryFactory $categoryFactory,
+        StoreManagerInterface $storeManager,
         TemplateFactory $templateFactory,
         PoolFactory $poolFactory,
         GiftCardFactory $giftCardFactory
@@ -162,6 +176,8 @@ class GiftCard
         $this->templateFactory = $templateFactory;
         $this->poolFactory = $poolFactory;
         $this->giftCardFactory = $giftCardFactory;
+        $this->categoryFactory = $categoryFactory;
+        $this->storeManager = $storeManager;
     }
 
     /**
@@ -175,6 +191,24 @@ class GiftCard
      */
     public function install(array $fixtures)
     {
+        /** @var \Magento\Catalog\Model\Category $giftCardCategory */
+        $giftCardCategory = $this->categoryFactory->create()->loadByAttribute('url_key', 'mageplaza-giftcard');
+        $categoryId = '';
+        if (!$giftCardCategory) {
+            $store = $this->storeManager->getStore();
+            $rootId = $store->getRootCategoryId();
+            $rootCat = $this->categoryFactory->create()->load($rootId);
+            $giftCardCategory = $this->categoryFactory->create();
+            $giftCardCategory->setName('Mageplaza Gift Card');
+            $giftCardCategory->setIsActive(true);
+            $giftCardCategory->setUrlKey('mageplaza-giftcard');
+            $giftCardCategory->setParentId($rootId);
+            $giftCardCategory->setStoreId($store->getId());
+            $giftCardCategory->setPath($rootCat->getPath());
+            $giftCardCategory->save();
+            $categoryId = $giftCardCategory->getId();
+        }
+
         foreach ($fixtures as $fileName) {
             $file = $this->fixtureManager->getFixture($fileName);
             if (!$this->ioFile->fileExists($file)) {
@@ -205,6 +239,7 @@ class GiftCard
                         foreach ($row as $key => $value) {
                             $data[$header[$key]] = $value;
                         }
+                        $data['category_ids'] = [$categoryId];
                         $data = $this->processProductData($data);
                         $product = $this->productFactory->create();
                         $product = $this->addProductImage($product, $data['image']);
